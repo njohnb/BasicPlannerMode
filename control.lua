@@ -131,8 +131,10 @@ function disable_planning_mode(player)
         end
     end
     -- Warn player if progress on current research was lost
+    if original._current then
         player.print("[color=orange]⚠ Research progress on \"" ..
                 original._current .. "\" was lost due to Planning Mode. Restarting from 0%.[/color]")
+    end
 end
 
 ----------------------------------------------------------------
