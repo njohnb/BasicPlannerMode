@@ -43,6 +43,33 @@ local function build_entity_tech_map(force)
     return map
 end
 
+local function simulate_planner_radars(player)
+    local surface = player.surface
+    local original_force = game.forces[global.original_force_name[player.index]]
+    local planner_force = game.forces["planner-force"]
+
+    global.simulated_planner_radars = global.simulated_planner_radars or {}
+
+    -- Remove old simulated radars first
+    for _, radar in pairs(global.simulated_planner_radars) do
+        if radar.valid then radar.destroy() end
+    end
+    global.simulated_planner_radars = {}
+
+    -- Create new simulated radars
+    for _, radar in pairs(surface.find_entities_filtered{force = original_force, name = "radar"}) do
+        local new_radar = surface.create_entity{
+            name = "radar",
+            position = radar.position,
+            force = planner_force,
+            destructible = false,
+            operable = false
+        }
+        new_radar.active = true
+        table.insert(global.simulated_planner_radars, new_radar)
+    end
+end
+
 ----------------------------------------------------------------
 -- Helper: Enable planning mode (pretend all techs are researched)
 ----------------------------------------------------------------
@@ -51,50 +78,60 @@ function enable_planning_mode(player)
     planning_mode_enabled[player.index] = true
     player.print("Planning Mode: Enabled (Map View)")
 
-    -- save current research state before modifying it
-    global.original_research[player.index] = {}
+   -- -- save current research state before modifying it
+   -- global.original_research[player.index] = {}
 
-    local force = player.force
+    local original_force = player.force
+    global.original_force_name = global.original_force_name or {}
+    global.original_force_name[player.index] = original_force.name
 
-    -- save active research and queue
-    global.original_research[player.index]._current = force.current_research and force.current_research.name or nil
-
-    global.original_research[player.index]._queue = {}
-    for i, tech in ipairs(force.research_queue) do
-        global.original_research[player.index]._queue[i] = tech.name
+    -- create or reuse a dummy force
+    local dummy_force = game.forces["planner-force"]
+    if not dummy_force then
+        dummy_force = game.create_force("planner-force")
     end
-    for name, tech in pairs(player.force.technologies) do
-        global.original_research[player.index][name] = tech.researched
+    -- Only configure dummy force once
+    if not global.planner_force_initialized then
+        -- Prevent combat or other issues
+        for _, force in pairs(game.forces) do
+            if force.name ~= "enemy" then
+                dummy_force.set_friend(force.name, true)
+                dummy_force.set_cease_fire(force.name, true)
+                force.set_friend("planner-force", true)
+                force.set_cease_fire("planner-force", true)
+                end
+            end
+        global.planner_force_initialized = true
+    end
+
+    original_force.set_friend("planner-force", true)
+    dummy_force.set_friend(original_force.name, true)
+    original_force.set_cease_fire("planner-force", true)
+    dummy_force.set_cease_fire(original_force.name, true)
+
+    -- set all tech as researched on dummy force
+    for _, tech in pairs(dummy_force.technologies) do
         tech.researched = true
     end
-end
 
+    player.force = dummy_force
 
--- Build a dependency graph of technologies
-local function get_sorted_technologies(force)
-    local graph = {}
-    local visited = {}
-    local sorted = {}
-
-    for name, tech in pairs(force.technologies) do
-        graph[name] = tech.prototype.prerequisites or {}
-    end
-
-    local function visit(name)
-        if visited[name] then return end
-        visited[name] = true
-        for _, prereq in pairs(graph[name]) do
-            visit(prereq.name)
+    -- copy charted areas from original force to planner-force
+    local surface = player.surface
+    for chunk in surface.get_chunks() do
+        local pos = {x = chunk.x * 32, y = chunk.y * 32}
+        if original_force.is_chunk_charted(surface, chunk) then
+            dummy_force.chart(surface, {left_top = pos, right_bottom = {x = pos.x + 32, y = pos.y + 32}})
         end
-        table.insert(sorted, name)
     end
 
-    for name in pairs(graph) do
-        visit(name)
-    end
+    simulate_planner_radars(player)
 
-    return sorted
+
 end
+
+
+
 ----------------------------------------------------------------
 -- Helper: Disable planning mode (restore original research state)
 ----------------------------------------------------------------
@@ -103,37 +140,20 @@ function disable_planning_mode(player)
     planning_mode_enabled[player.index] = false
     player.print("Planning Mode: Disabled")
 
-    local original = global.original_research[player.index] or {}
-    local force = player.force
-    local sorted_names = get_sorted_technologies(force)
+    -- restore original force
+    local original_force_name = global.original_force_name and global.original_force_name[player.index]
+    local original_force = original_force_name and game.forces[original_force_name]
+    if original_force then
+        player.force = original_force
+    else
+        player.print("[color=red]⚠ Could not restore original force after Planning Mode.[/color]")
+    end
 
-    for _, name in ipairs(sorted_names) do
-        local tech = force.technologies[name]
-        if original[name] ~= nil then
-            tech.researched = original[name]
-        else
-            tech.researched = false
+    if global.simulated_planner_radars then
+        for _, radar in pairs(global.simulated_planner_radars) do
+            if radar.valid then radar.destroy() end
         end
-    end
-
-    -- Clear the queue by disabling and re-enabling it
-    while force.current_research do
-        force.cancel_current_research()
-    end
-
-    -- Restore research queue in original order
-    if original._queue then
-        for _, tech_name in ipairs(original._queue) do
-            local tech = force.technologies[tech_name]
-            if tech and not tech.researched then
-                force.add_research(tech)
-            end
-        end
-    end
-    -- Warn player if progress on current research was lost
-    if original._current then
-        player.print("[color=orange]⚠ Research progress on \"" ..
-                original._current .. "\" was lost due to Planning Mode. Restarting from 0%.[/color]")
+        global.simulated_planner_radars = nil
     end
 end
 
