@@ -51,11 +51,50 @@ function enable_planning_mode(player)
     planning_mode_enabled[player.index] = true
     player.print("Planning Mode: Enabled (Map View)")
 
-    for _, tech in pairs(player.force.technologies) do
+    -- save current research state before modifying it
+    global.original_research[player.index] = {}
+
+    local force = player.force
+
+    -- save active research and queue
+    global.original_research[player.index]._current = force.current_research and force.current_research.name or nil
+
+    global.original_research[player.index]._queue = {}
+    for i, tech in ipairs(force.research_queue) do
+        global.original_research[player.index]._queue[i] = tech.name
+    end
+    for name, tech in pairs(player.force.technologies) do
+        global.original_research[player.index][name] = tech.researched
         tech.researched = true
     end
 end
 
+
+-- Build a dependency graph of technologies
+local function get_sorted_technologies(force)
+    local graph = {}
+    local visited = {}
+    local sorted = {}
+
+    for name, tech in pairs(force.technologies) do
+        graph[name] = tech.prototype.prerequisites or {}
+    end
+
+    local function visit(name)
+        if visited[name] then return end
+        visited[name] = true
+        for _, prereq in pairs(graph[name]) do
+            visit(prereq.name)
+        end
+        table.insert(sorted, name)
+    end
+
+    for name in pairs(graph) do
+        visit(name)
+    end
+
+    return sorted
+end
 ----------------------------------------------------------------
 -- Helper: Disable planning mode (restore original research state)
 ----------------------------------------------------------------
@@ -65,9 +104,35 @@ function disable_planning_mode(player)
     player.print("Planning Mode: Disabled")
 
     local original = global.original_research[player.index] or {}
-    for name, tech in pairs(player.force.technologies) do
-        tech.researched = original[name] or false
+    local force = player.force
+    local sorted_names = get_sorted_technologies(force)
+
+    for _, name in ipairs(sorted_names) do
+        local tech = force.technologies[name]
+        if original[name] ~= nil then
+            tech.researched = original[name]
+        else
+            tech.researched = false
+        end
     end
+
+    -- Clear the queue by disabling and re-enabling it
+    while force.current_research do
+        force.cancel_current_research()
+    end
+
+    -- Restore research queue in original order
+    if original._queue then
+        for _, tech_name in ipairs(original._queue) do
+            local tech = force.technologies[tech_name]
+            if tech and not tech.researched then
+                force.add_research(tech)
+            end
+        end
+    end
+    -- Warn player if progress on current research was lost
+        player.print("[color=orange]⚠ Research progress on \"" ..
+                original._current .. "\" was lost due to Planning Mode. Restarting from 0%.[/color]")
 end
 
 ----------------------------------------------------------------
