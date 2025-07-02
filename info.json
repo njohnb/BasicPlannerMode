@@ -1,0 +1,9 @@
+{
+  "name": "TechUnlockInMapView",
+  "version": "0.1",
+  "title": "Research Unlocked in Map Mode",
+  "author": "VogueRogue",
+  "factorio_version": "2.0",
+  "dependencies": ["base >= 2.0"],
+  "description": "Allows ghost placement of all entities in map view before they are researched, but blocks actual construction."
+}
