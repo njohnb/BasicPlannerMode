@@ -112,6 +112,10 @@ function enable_planning_mode(player)
     -- disable hand-crafting while planning mode enabled
     player.character_crafting_speed_modifier = -1
 
+
+    -- store any active crafting queue recipes
+    global.saved_crafting_queue_size = global.saved_crafting_queue_size or {}
+    global.saved_crafting_queue_size[player.index] = #player.crafting_queue
 end
 
 
@@ -148,6 +152,10 @@ function disable_planning_mode(player)
 
     -- re-enable hand-crafting while planning mode enabled
     player.character_crafting_speed_modifier = 0
+
+    if global.saved_crafting_queue_size then
+        global.saved_crafting_queue_size[player.index] = nil
+    end
 end
 
 ----------------------------------------------------------------
@@ -175,10 +183,18 @@ script.on_event("planning-mode-toggle", function(event)
 end)
 script.on_event(defines.events.on_player_main_inventory_changed, function(event)
     local player = game.get_player(event.player_index)
-    if not player or not player.valid then return end
+    if not player or not player.valid or not planning_mode_enabled[player.index] then return end
 
-    if planning_mode_enabled[player.index] and player.crafting_queue_size > 0 then
-        player.cancel_crafting{index = 1, count = player.crafting_queue_size}
+    local saved_size = global.saved_crafting_queue_size and global.saved_crafting_queue_size[player.index] or 0
+    local current_size = #player.crafting_queue
+
+    if current_size > saved_size then
+        -- cancel only newly added items
+        for i = current_size, saved_size + 1, -1 do
+            if player.crafting_queue[i] then
+                player.cancel_crafting{index = i, count = 1}
+            end
+        end
         player.print("[color=orange]⚠ Crafting is disabled in Planning Mode.[/color]")
     end
 end)
