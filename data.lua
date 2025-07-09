@@ -20,11 +20,5 @@ data:extend({
         name = "planning-mode-block-research-key",
         key_sequence = "T", -- must match the original key
         consuming = "game-only"   -- prevents the default behavior
-    },
-    {
-        type = "custom-input",
-        name = "planning-mode-block-crafting-gui",
-        key_sequence = "",
-        consuming = "none"
     }
 })

@@ -45,8 +45,10 @@ function enable_planning_mode(player)
     planning_mode_enabled[player.index] = true
     player.print("Planning Mode: Enabled")
 
-   -- -- save current research state before modifying it
-   -- global.original_research[player.index] = {}
+    -- check if crafting menu is open
+    if player.opened_gui_type == 3 then
+        player.opened = nil
+    end
 
     local original_force = player.force
     global.original_force_name = global.original_force_name or {}
@@ -108,14 +110,6 @@ function enable_planning_mode(player)
         caption = "[Planning Mode Enabled]",
         style = "planning_mode_label_style"
     }
-
-    -- disable hand-crafting while planning mode enabled
-    player.character_crafting_speed_modifier = -1
-
-
-    -- store any active crafting queue recipes
-    global.saved_crafting_queue_size = global.saved_crafting_queue_size or {}
-    global.saved_crafting_queue_size[player.index] = #player.crafting_queue
 end
 
 
@@ -149,15 +143,18 @@ function disable_planning_mode(player)
     if button_flow.planning_mode_frame then
         button_flow.planning_mode_frame.destroy()
     end
-
-    -- re-enable hand-crafting while planning mode enabled
-    player.character_crafting_speed_modifier = 0
-
-    if global.saved_crafting_queue_size then
-        global.saved_crafting_queue_size[player.index] = nil
-    end
 end
 
+script.on_event("planning-mode-toggle", function(event)
+    local player = game.get_player(event.player_index)
+    if not player then return end
+
+    if planning_mode_enabled[player.index] then
+        disable_planning_mode(player)
+    else
+        enable_planning_mode(player)
+    end
+end)
 ----------------------------------------------------------------
 -- Event: Block opening the tech tree while planning mode is enabled
 ----------------------------------------------------------------
@@ -171,30 +168,19 @@ script.on_event("planning-mode-block-research-key", function(event)
         player.open_technology_gui() -- manually open it if planning mode is off
     end
 end)
-script.on_event("planning-mode-toggle", function(event)
+
+local function is_player_in_map_view(player)
+    return player and player.valid and
+            player.controller_type == defines.controllers.remote
+end
+script.on_event(defines.events.on_gui_opened, function(event)
     local player = game.get_player(event.player_index)
     if not player then return end
 
-    if planning_mode_enabled[player.index] then
-        disable_planning_mode(player)
-    else
-        enable_planning_mode(player)
-    end
-end)
-script.on_event(defines.events.on_player_main_inventory_changed, function(event)
-    local player = game.get_player(event.player_index)
-    if not player or not player.valid or not planning_mode_enabled[player.index] then return end
-
-    local saved_size = global.saved_crafting_queue_size and global.saved_crafting_queue_size[player.index] or 0
-    local current_size = #player.crafting_queue
-
-    if current_size > saved_size then
-        -- cancel only newly added items
-        for i = current_size, saved_size + 1, -1 do
-            if player.crafting_queue[i] then
-                player.cancel_crafting{index = i, count = 1}
-            end
-        end
+    -- You can inspect event.gui_type, event.element, event.entity, etc.
+    -- Leave logic here blank for now
+    if planning_mode_enabled[player.index] and not is_player_in_map_view(player) then
         player.print("[color=orange]⚠ Crafting is disabled in Planning Mode.[/color]")
+        player.opened = nil
     end
 end)
